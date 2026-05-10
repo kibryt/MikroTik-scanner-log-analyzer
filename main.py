@@ -30,6 +30,7 @@ def main():
     else:
         print("Couldn't collect any logs.")
 
+
 class NetworkScanner:
     def __init__(self, address, mask):
         self.address = address
