@@ -1,0 +1,11 @@
+[project]
+name = "projectone"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "paramiko>=4.0.0",
+    "requests>=2.33.1",
+    "scapy>=2.7.0",
+]
