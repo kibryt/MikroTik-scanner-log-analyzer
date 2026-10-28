@@ -1,34 +1,77 @@
+#!/usr/bin/env python3
+
 import requests
 import re
-from scapy.layers.l2 import ARP, Ether, srp
 from contextlib import contextmanager
 import paramiko
 import csv
 from pathlib import Path
 import argparse
 import getpass
+import sys
+import time
 
-def main():
-    parser = argparse.ArgumentParser(description="MikroTik Network Scanner & Log Analyzer")
-    parser.add_argument("-i", "--ip", required=True, help="MikroTik IP Address")
+# Constants and safety fucntion
+
+OUI_URL = "https://www.netify.ai/resources/macs/brands/mikrotik"
+FALLBACK_MIKROTIK = {
+    '00:0C:42', '08:55:31', '18:FD:74', '2C:C8:1B', '48:8F:5A', '48:A9:8A',
+    '4C:5E:0C', '64:D1:54', '6C:3B:6B', '74:4D:28', '78:9A:18', 'C4:AD:34',
+    'CC:2D:E0', 'D4:01:C3', 'D4:CA:6D', 'DC:2C:6E', 'E4:8D:8C', 'F4:1E:57',
+    'B8:69:F4', '04:F4:1C', 'D0:EA:11',
+}
+LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
+SAFE_FILENAME = re.compile(r"[A-Za-z0-9_.-]+") # used to prevent command injection
+LOG_LINE = re.compile(
+    r"^(?P<timestamp>.+?)\s+"
+    r"(?P<topics>[a-z][a-z0-9-]*(?:,[a-z][a-z0-9-]*)*)\s+"
+    r"(?P<message>.+)$"
+)
+CSV_FIELDS = ["timestamp", "topics", "level", "message"]
+
+def safe_filename(value):
+    if not SAFE_FILENAME.fullmatch(value):
+        raise argparse.ArgumentTypeError("use only letters, digits, '_', '-' and '.' in the file name")
+    return value
+
+# Entry point
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="MikroTik Log Collector")
+    parser.add_argument("-i", "--ip", required=True, help="MikroTik IP address")
     parser.add_argument("-u", "--user", required=True, help="SSH username")
-    parser.add_argument("-p", "--path", default=".", help="Save path (default is current folder)")
-    parser.add_argument("-f", "--filename", default="mikrotik_logs", help="File name")
+    parser.add_argument("-p", "--path", default=".", help="Folder to save files in (default: current folder)")
+    parser.add_argument("-f", "--filename", default="mikrotik_logs", type=safe_filename, help="File name without extension (default: mikrotik_logs)")
+    parser.add_argument("--trust-new-host", action="store_true", help="Accept the router's SSH host key if it is not known yet")
+    # parser.add_argument("-s", "--scan", metavar="NETWORK", help="Scan a network for MikroTik devices, e.g. 192.168.88.0/24 (needs root)")
 
     args = parser.parse_args()
+    # if not args.scan and not (args.ip and args.user):
+    #     parser.error("-i and -u are required unless --scan is used")
+    return args
+
+
+def main():
+    args = parse_args()
+
+    out_dir = Path(args.path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    txt_path = out_dir / f"{args.filename}.txt"
+    csv_path = out_dir / f"{args.filename}.csv"
+
+    if csv_path.exists():
+        sys.exit(f"{csv_path} already exists. Provide a new --filename.")
 
     password = getpass.getpass(prompt=f'Enter the password for {args.user}@{args.ip}: ')
     print("Connecting...")
-    mikrotik = MikrotikDevice(args.ip)
-    full_log_path = Path(args.path) / f"{args.filename}.txt"
-    mikrotik.get_logs(args.user, password, args.filename, str(full_log_path))
-    if full_log_path.exists():
-        print("Analysing...")
-        analyze = LogAnalyzer(full_log_path)
-        analyze.parse_logs(str(Path(args.path) / args.filename))
-        print("Results saved to csv file.")
-    else:
-        print("Couldn't collect any logs.")
+    mikrotik = MikrotikDevice(args.ip, trust_new_host=args.trust_new_host)
+
+    if not mikrotik.get_logs(args.user, password, args.filename, txt_path):
+        sys.exit("Couldn't collect any logs.")
+
+    print("Analysing...")
+    rows = LogAnalyzer(txt_path).parse_logs(csv_path)
+    print(f"Saved {rows} log entries to {csv_path}")
 
 
 class NetworkScanner:
@@ -36,119 +79,132 @@ class NetworkScanner:
         self.address = address
         self.mask = mask
         self.timeout = 1
-        self.active_hosts = []
+        self.active_hosts = {}
         self.mikrotik_devices = []
 
     @staticmethod
     def getmacs():
         try:
-            response = requests.get("https://www.netify.ai/resources/macs/brands/mikrotik")
-            return [mac.upper() for mac in re.findall(r"(?:[0-9a-fA-F]{2}:){2}[0-9a-fA-F]{2}", response.text)]
-        except:
-            return ['00:0C:42', '08:55:31', '18:FD:74', '2C:C8:1B', '48:8F:5A', '48:A9:8A', '4C:5E:0C', '64:D1:54', '6C:3B:6B', '74:4D:28', '78:9A:18', 'C4:AD:34', 'CC:2D:E0', 'D4:01:C3', 'D4:CA:6D', 'DC:2C:6E', 'E4:8D:8C', 'F4:1E:57', 'B8:69:F4', '04:F4:1C', 'D0:EA:11']
+            response = requests.get(OUI_URL, timeout=10)
+            response.raise_for_status()
+        except requests.RequestException:
+            return FALLBACK_MIKROTIK
+
+        found = {mac.upper() for mac in re.findall(r"(?:[0-9a-fA-F]{2}:){2}[0-9a-fA-F]{2}", response.text)}
+        return found or FALLBACK_MIKROTIK
 
     def scan(self):
+        from scapy.layers.l2 import ARP, Ether, srp
         try:
             arp = ARP(pdst=f'{self.address}/{self.mask}')
             ether = Ether(dst='ff:ff:ff:ff:ff:ff')
             packet = ether/arp
-            result = srp(packet, timeout=2, verbose=0)[0]
-            for sent, received in result:
-                host_ip = received.psrc
-                host_mac = received.hwsrc
-                self.active_hosts.append({host_ip : host_mac})
+            answered, _ = srp(packet, timeout=self.timeout, verbose=0)
+            for _, received in answered:
+                self.active_hosts[received.psrc] = received.hwsrc
         except Exception as e:
             print(f'Error while scanning: {e}')
 
+        # return self.active_hosts # might be useful in future
+
     def find_mikrotik_devices(self):
         macs = self.getmacs()
-        for device in self.active_hosts:
-            for ip, mac in device.items():
-                if mac[0:8].upper() in macs:
-                    self.mikrotik_devices.append(ip)
+        self.mikrotik_devices = [ip for ip, mac in self.active_hosts.items() if mac[:8].upper() in macs]
 
 
 class MikrotikDevice:
-    def __init__(self, ip):
+    def __init__(self, ip, port=22, timeout=10, trust_new_host=False):
         self.ip = ip
+        self.port = port
+        self.timeout = timeout
+        self.trust_new_host = trust_new_host
 
     @contextmanager
     def set_connection(self, login, password):
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy() if self.trust_new_host else paramiko.RejectPolicy())
+        connected = False
         try:
-            client.connect(hostname=self.ip, port=22, username=login, password=password)
-        except Exception as e:
-            print(f'Error during connecting: {e}')
-            yield None
-        else:
-            yield client
+            client.connect(hostname=self.ip, port=self.port, username=login, password=password, timeout=self.timeout, look_for_keys=False, allow_agent=False)
+            connected = True
+        except paramiko.AuthenticationException:
+            print("Authentication failed: wrong username or password.")
+        except (paramiko.SSHException, OSError) as e:
+            print(f"Couldn't connect: {e}")
+
+        try:
+            yield client if connected else None
         finally:
             client.close()
-            print('Connection closed')
+            if connected:
+                print("Connection closed")
+
+    def _export_and_download(self, login, password, command, remote_name, local_path):
+        with self.set_connection(login, password) as ssh:
+            if ssh is None:
+                return False
+
+            _, stdout, stderr = ssh.exec_command(command)
+
+            if stdout.channel.recv_exit_status() != 0:
+                print(f"Router returned an error: {stderr.read().decode().strip()}")
+                return False
+
+            try:
+                # time.sleep(1) # solution to possible error caused by too quick transfer attempt
+                with ssh.open_sftp() as sftp:
+                    sftp.get(remote_name, str(local_path))
+                    try:
+                        sftp.remove(remote_name)
+                    except OSError as e:
+                        print(f"Couldn't remove {remote_name} from the router: {e}")
+            except (OSError, paramiko.SSHException) as e:
+                print(f"Error occurred during file transfer: {e}")
+                return False
+            return True
 
     def get_logs(self, login, password, filename, localpath):
-        localpath = Path(localpath)
-        with self.set_connection(login, password) as ssh_connection:
-            if ssh_connection is None:
-                return None
-            stdin, stdout, stderr = ssh_connection.exec_command(f'/log print file={filename}')
-            status = stdout.channel.recv_exit_status()
-            if status == 0:
-                try:
-                    sftp_client = ssh_connection.open_sftp()
-                    sftp_client.get(f'{filename}.txt', localpath)
-                    sftp_client.close()
-                except Exception as e:
-                    print(f'Error occurred during file transfer: {e}')
-            return None
+        safe_filename(filename)
+        return self._export_and_download(login, password, command=f"/log print file={filename}", remote_name=f"{filename}.txt", local_path=localpath)
 
     def get_conf_backup(self, login, password, filename, localpath):
-        with self.set_connection(login, password) as ssh_connection:
-            if ssh_connection is None:
-                return None
-            stdin, stdout, stderr = ssh_connection.exec_command(f'/system backup save name={filename}')
-            status = stdout.channel.recv_exit_status()
-            if status == 0:
-                try:
-                    sftp_client = ssh_connection.open_sftp()
-                    sftp_client.get(f'{filename}.backup', localpath)
-                    sftp_client.close()
-                except Exception as e:
-                    print(f'Error occurred during file transfer: {e}')
-            return None
+        safe_filename(filename)
+
+        return self._export_and_download(login, password, command=f"/system backup save name={filename}", remote_name=f"{filename}.backup", local_path=localpath)
 
 
 class LogAnalyzer:
     def __init__(self, file):
         self.file = Path(file)
 
+    @staticmethod
+    def _parse_line(line):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            return None
+
+        match = LOG_LINE.match(line)
+        if match is None:
+            return None
+
+        topics = match["topics"].split(",")
+        level = next((t for t in topics if t in LOG_LEVELS), "N/A")
+        other_topics = [t for t in topics if t != level]
+        return [match["timestamp"], ",".join(other_topics), level, match["message"]]
+
     def parse_logs(self, output_file):
-        output_file = Path(f'{output_file}.csv')
-        if output_file.is_file():
-            raise FileExistsError('File already exists. Using this program you have to provide a new filename.')
-        with open(self.file, 'r', newline='', encoding='utf-8') as file_in, open(output_file, 'w', newline='', encoding='utf-8') as output:
-            fields = ['timestamp', 'device', 'level', 'description', 'message']
-            csvwriter = csv.writer(output)
-            csvwriter.writerow(fields)
-            for line in file_in:
-                if '#' in line:
+        rows = 0
+        with open(self.file, "r", encoding="utf-8") as src, open(output_file, "x", newline="", encoding="utf-8") as dst:
+            writer = csv.writer(dst)
+            writer.writerow(CSV_FIELDS)
+            for line in src:
+                row = self._parse_line(line)
+                if row is None:
                     continue
-                parted_log = line.strip().split(' ', maxsplit=3)
-                if len(parted_log) < 4:
-                    continue
-                separated = parted_log[2].split(',')
-                device = separated[0]
-                if len(separated) == 3:
-                    level = separated[1]
-                    description = separated[2]
-                else:
-                    level = 'N/A'
-                    description = separated[1]
-                timestamp = f'{parted_log[0]} {parted_log[1]}'
-                message = parted_log[3]
-                row = [timestamp, device, level, description, message]
-                csvwriter.writerow(row)
+                writer.writerow(row)
+                rows += 1
+        return rows
 
 
 if __name__ == "__main__":
