@@ -1,10 +1,10 @@
-# MikroTik Network Automation & Analyzer
+# MikroTik Log Collector & Analyzer
 
-A Python-based CLI tool for network scanning, MikroTik device identification, automated log extraction, and parsing.
+A Python-based CLI tool for automated log extraction, and parsing. (Network scanning, MikroTik device identification is going to be the next update's utility)
 
 ## Features
-* **Subnet Scanning:** Utilizes `scapy` (ARP requests) to discover active hosts on the local network. -- NOT YET IMPLEMENTED AS A READY UTILITY
-* **Vendor Identification:** Identifies MikroTik devices by matching MAC addresses against the Netify OUI API.
+* **Subnet Scanning:** Utilizes `scapy` (ARP requests) to discover active hosts on the local network. -- (the NetworkScanner class exists, but there is no CLI option for it yet)
+* **Vendor Identification:** Identifies MikroTik devices by matching MAC addresses against the OUIs scraped from netify.ai (fallback list is also present).
 * **Automated Log Fetching:** Establishes a secure SSH connection (`paramiko`) using context managers to safely download system logs.
 * **Log Parsing:** Parses raw MikroTik logs into a structured, easy-to-read `.csv` format for further analysis.
 
@@ -12,14 +12,25 @@ A Python-based CLI tool for network scanning, MikroTik device identification, au
 * Python 3.13+
 * `uv`
 
+## Installation
+```bash
+git clone https://github.com/kibryt/MikroTik-scanner-log-analyzer.git
+cd MikroTik-scanner-log-analyzer
+```
+
 ## Usage
 Run the script from the terminal:
 `uv run main.py -h`
-This will print required parameters - everything's pretty straightforward
+This will print required parameters
+
+example usage:
+`uv run main.py -i 192.168.88.1 -u admin -p ./logs -f router1_logs1`
 
 You will be prompted to securely enter your SSH password.
 
+If you're connecting with a router for the first time using ssh on a ceratin device, you have to use `--trust-new-host` - keep in mind that this is unsafe option in not verified environment. You can also firstly connect to a router using normal ssh client, and then omit the flag. 
+
 ## Architecture
-* Designed using **OOP principles** (Encapsulation, Single Responsibility).
+* Designed using **OOP principles** - MikrotikDevice handles the connection, LogAnalyzer parses logs, NetworkScanner finds devices.
 * Safe resource management utilizing Python's `@contextmanager` for SSH sessions.
-* Avoids hardcoded credentials by using `argparse` and `getpass`.
+* The password is entered interactively (`getpass`), so it never appears in shell history or process list.
