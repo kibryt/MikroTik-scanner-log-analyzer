@@ -22,6 +22,7 @@ cd MikroTik-scanner-log-analyzer
 
 ## Usage
 Run the script from the terminal:
+
 `uv run main.py -h`
 
 This will print required parameters
