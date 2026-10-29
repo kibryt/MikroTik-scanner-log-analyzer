@@ -1,7 +1,7 @@
 [project]
-name = "projectone"
+name = "MikroTik-scanner-log-analyzer"
 version = "0.1.0"
-description = ""
+description = "CLI tool that downloads logs from a MikroTik router over SSH and converts them to CSV"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
