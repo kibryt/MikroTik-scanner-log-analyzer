@@ -3,18 +3,19 @@
 A Python-based CLI tool for network scanning, MikroTik device identification, automated log extraction, and parsing.
 
 ## Features
-* **Subnet Scanning:** Utilizes `scapy` (ARP requests) to discover active hosts on the local network.
+* **Subnet Scanning:** Utilizes `scapy` (ARP requests) to discover active hosts on the local network. -- NOT YET IMPLEMENTED AS A READY UTILITY
 * **Vendor Identification:** Identifies MikroTik devices by matching MAC addresses against the Netify OUI API.
 * **Automated Log Fetching:** Establishes a secure SSH connection (`paramiko`) using context managers to safely download system logs.
 * **Log Parsing:** Parses raw MikroTik logs into a structured, easy-to-read `.csv` format for further analysis.
 
 ## Requirements
-* Python 3.8+
-* `uv sync`
+* Python 3.13+
+* `uv`
 
 ## Usage
-Run the script from the terminal providing the target IP and SSH username:
-`uv run main.py -i <MIKROTIK_IP> -u <USERNAME>`
+Run the script from the terminal:
+`uv run main.py -h`
+This will print required parameters - everything's pretty straightforward
 
 You will be prompted to securely enter your SSH password.
 
