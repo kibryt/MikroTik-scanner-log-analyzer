@@ -34,7 +34,7 @@ You will be prompted to securely enter your SSH password.
 ## Important
 
 Script requires open ssh port on the router and account with proper permissions.
-The router’s SSH host key must be known to your machine. Either connect once with a regular ssh client, or pass --trust-new-host (unsafe on untrusted networks; the key is not saved, so the flag is needed on every run).
+The router’s SSH host key must be known to your machine. Either connect once with a regular ssh client, or pass `--trust-new-host` (unsafe on untrusted networks; the key is not saved, so the flag is needed on every run).
 
 ## Architecture
 * Designed using **OOP principles** - MikrotikDevice handles the connection, LogAnalyzer parses logs, NetworkScanner finds devices.
