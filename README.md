@@ -23,10 +23,12 @@ cd MikroTik-scanner-log-analyzer
 ## Usage
 Run the script from the terminal:
 `uv run main.py -h`
+
 This will print required parameters
 
 #### Example usage:
 `uv run main.py -i 192.168.88.1 -u admin -p ./logs -f router1_logs1` 
+
 Script returns an error if file already exists.
 
 You will be prompted to securely enter your SSH password.
