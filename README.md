@@ -43,3 +43,26 @@ The router’s SSH host key must be known to your machine. Either connect once w
 * Designed using **OOP principles** - MikrotikDevice handles the connection, LogAnalyzer parses logs, NetworkScanner finds devices.
 * Safe resource management utilizing Python's `@contextmanager` for SSH sessions.
 * The password is entered interactively (`getpass`), so it never appears in shell history or process list.
+
+## Running tests
+
+The log parser is covered by unit tests written with [pytest](https://docs.pytest.org/).
+
+Install the project together with development dependencies:
+
+```bash
+uv sync
+```
+
+Run the tests:
+
+```bash
+uv run pytest -v
+```
+
+The tests cover:
+
+- parsing of real RouterOS log lines into `timestamp`, `topics`, `level` and `message` fields,
+- edge cases such as empty lines, comments and malformed lines, which are skipped,
+- writing parsed logs to a CSV file, including messages that contain commas,
+- refusing to overwrite an existing output file.
